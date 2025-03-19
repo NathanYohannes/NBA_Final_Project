@@ -25,7 +25,7 @@ def get_available_years():
 
 def calculate_metrics(outputs, targets):
     """
-    Calculate accuracy, precision, recall, and F1 score.
+    Calculate accuracy, precision, recall, F1 score, and top-3 accuracy.
     
     Args:
         outputs: Model outputs (logits)
@@ -34,27 +34,35 @@ def calculate_metrics(outputs, targets):
     Returns:
         Dictionary containing the metrics
     """
+    # Calculate top-1 accuracy
     _, predicted = torch.max(outputs.data, 1)
     predicted = predicted.cpu().numpy()
-    targets = targets.cpu().numpy()
+    targets_np = targets.cpu().numpy()
     
     # Calculate accuracy
-    correct = (predicted == targets).sum()
-    total = len(targets)
+    correct = (predicted == targets_np).sum()
+    total = len(targets_np)
     accuracy = correct / total
     
+    # Calculate top-3 accuracy
+    _, top3_indices = torch.topk(outputs.data, k=3, dim=1)
+    top3_indices = top3_indices.cpu().numpy()
+    targets_expanded = np.expand_dims(targets_np, axis=1)
+    top3_correct = np.any(top3_indices == targets_expanded, axis=1).sum()
+    top3_accuracy = top3_correct / total
+    
     # Calculate precision and recall for each class
-    unique_classes = np.unique(targets)
+    unique_classes = np.unique(targets_np)
     precisions = []
     recalls = []
     
     for cls in unique_classes:
         # True positives: predicted class is cls and actual class is cls
-        tp = ((predicted == cls) & (targets == cls)).sum()
+        tp = ((predicted == cls) & (targets_np == cls)).sum()
         # False positives: predicted class is cls but actual class is not cls
-        fp = ((predicted == cls) & (targets != cls)).sum()
+        fp = ((predicted == cls) & (targets_np != cls)).sum()
         # False negatives: predicted class is not cls but actual class is cls
-        fn = ((predicted != cls) & (targets == cls)).sum()
+        fn = ((predicted != cls) & (targets_np == cls)).sum()
         
         # Calculate precision and recall for this class
         precision = tp / (tp + fp) if (tp + fp) > 0 else 0
@@ -72,6 +80,7 @@ def calculate_metrics(outputs, targets):
     
     return {
         'accuracy': accuracy,
+        'top3_accuracy': top3_accuracy,
         'precision': precision,
         'recall': recall,
         'f1': f1
@@ -86,7 +95,7 @@ def plot_metrics(metrics_history, year):
         year: The year being trained
     """
     # Create figure with subplots
-    fig, axes = plt.subplots(2, 2, figsize=(15, 12))
+    fig, axes = plt.subplots(3, 2, figsize=(15, 18))
     fig.suptitle(f'Training Metrics for Year {year}')
     
     # Plot loss
@@ -100,28 +109,39 @@ def plot_metrics(metrics_history, year):
     # Plot accuracy
     axes[0, 1].plot(metrics_history['train_accuracy'], label='Train')
     axes[0, 1].plot(metrics_history['val_accuracy'], label='Validation')
-    axes[0, 1].set_title('Accuracy')
+    axes[0, 1].set_title('Top-1 Accuracy')
     axes[0, 1].set_xlabel('Epoch')
     axes[0, 1].set_ylabel('Accuracy')
     axes[0, 1].legend()
     
-    # Plot precision and recall
-    axes[1, 0].plot(metrics_history['train_precision'], label='Train Precision')
-    axes[1, 0].plot(metrics_history['train_recall'], label='Train Recall')
-    axes[1, 0].plot(metrics_history['val_precision'], label='Val Precision')
-    axes[1, 0].plot(metrics_history['val_recall'], label='Val Recall')
-    axes[1, 0].set_title('Precision and Recall')
+    # Plot top-3 accuracy
+    axes[1, 0].plot(metrics_history['train_top3_accuracy'], label='Train')
+    axes[1, 0].plot(metrics_history['val_top3_accuracy'], label='Validation')
+    axes[1, 0].set_title('Top-3 Accuracy')
     axes[1, 0].set_xlabel('Epoch')
-    axes[1, 0].set_ylabel('Score')
+    axes[1, 0].set_ylabel('Accuracy')
     axes[1, 0].legend()
     
-    # Plot F1 score
-    axes[1, 1].plot(metrics_history['train_f1'], label='Train')
-    axes[1, 1].plot(metrics_history['val_f1'], label='Validation')
-    axes[1, 1].set_title('F1 Score')
+    # Plot precision and recall
+    axes[1, 1].plot(metrics_history['train_precision'], label='Train Precision')
+    axes[1, 1].plot(metrics_history['train_recall'], label='Train Recall')
+    axes[1, 1].plot(metrics_history['val_precision'], label='Val Precision')
+    axes[1, 1].plot(metrics_history['val_recall'], label='Val Recall')
+    axes[1, 1].set_title('Precision and Recall')
     axes[1, 1].set_xlabel('Epoch')
-    axes[1, 1].set_ylabel('F1 Score')
+    axes[1, 1].set_ylabel('Score')
     axes[1, 1].legend()
+    
+    # Plot F1 score
+    axes[2, 0].plot(metrics_history['train_f1'], label='Train')
+    axes[2, 0].plot(metrics_history['val_f1'], label='Validation')
+    axes[2, 0].set_title('F1 Score')
+    axes[2, 0].set_xlabel('Epoch')
+    axes[2, 0].set_ylabel('F1 Score')
+    axes[2, 0].legend()
+    
+    # Keep one subplot empty or use it for another metric if needed
+    axes[2, 1].axis('off')
     
     # Adjust layout and save
     plt.tight_layout()
@@ -157,6 +177,7 @@ def train_model(train_loader: DataLoader, val_loader: DataLoader, model: NBALine
     metrics_history = {
         'train_loss': [], 'val_loss': [],
         'train_accuracy': [], 'val_accuracy': [],
+        'train_top3_accuracy': [], 'val_top3_accuracy': [],
         'train_precision': [], 'val_precision': [],
         'train_recall': [], 'val_recall': [],
         'train_f1': [], 'val_f1': []
@@ -214,6 +235,8 @@ def train_model(train_loader: DataLoader, val_loader: DataLoader, model: NBALine
         metrics_history['val_loss'].append(val_loss / len(val_loader))
         metrics_history['train_accuracy'].append(train_metrics['accuracy'])
         metrics_history['val_accuracy'].append(val_metrics['accuracy'])
+        metrics_history['train_top3_accuracy'].append(train_metrics['top3_accuracy'])
+        metrics_history['val_top3_accuracy'].append(val_metrics['top3_accuracy'])
         metrics_history['train_precision'].append(train_metrics['precision'])
         metrics_history['val_precision'].append(val_metrics['precision'])
         metrics_history['train_recall'].append(train_metrics['recall'])
@@ -227,6 +250,8 @@ def train_model(train_loader: DataLoader, val_loader: DataLoader, model: NBALine
         print(f"Validation Loss: {metrics_history['val_loss'][-1]:.4f}")
         print(f"Training Accuracy: {train_metrics['accuracy']:.4f}")
         print(f"Validation Accuracy: {val_metrics['accuracy']:.4f}")
+        print(f"Training Top-3 Accuracy: {train_metrics['top3_accuracy']:.4f}")
+        print(f"Validation Top-3 Accuracy: {val_metrics['top3_accuracy']:.4f}")
         print(f"Training F1: {train_metrics['f1']:.4f}")
         print(f"Validation F1: {val_metrics['f1']:.4f}")
         
@@ -247,6 +272,8 @@ def train_model(train_loader: DataLoader, val_loader: DataLoader, model: NBALine
                 'val_loss': metrics_history['val_loss'][-1],
                 'train_accuracy': train_metrics['accuracy'],
                 'val_accuracy': val_metrics['accuracy'],
+                'train_top3_accuracy': train_metrics['top3_accuracy'],
+                'val_top3_accuracy': val_metrics['top3_accuracy'],
                 'train_f1': train_metrics['f1'],
                 'val_f1': val_metrics['f1'],
             }, str(model_path))
